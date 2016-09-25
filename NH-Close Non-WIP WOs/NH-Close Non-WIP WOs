@@ -1,0 +1,15 @@
+function CloseNonWipWO()
+{
+var records = nlapiSearchRecord('transaction', 748, null, null);
+
+for ( var i = 0; records != null && i < records.length; i++ )
+	{
+	var rectype = records[i].getRecordType();
+	var record = nlapiLoadRecord( rectype , records[i].getId() );
+	for (var line = 1; line <= record.getLineItemCount('item'); ++line)
+	{
+		record.setLineItemValue('item', 'isclosed', line, 'T');
+	}
+nlapiSubmitRecord(record, false, true);
+	}
+} 
