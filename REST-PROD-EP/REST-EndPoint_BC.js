@@ -26,7 +26,7 @@ define(['N/email', 'N/error', 'N/file', 'N/https', 'N/record', 'N/runtime', 'N/s
             } else {
                 env = 'LIVE';
             }
-            slack_obj['text'] = '```'+ method + ': ' + text + ' ' + env + ' ' + runtime.getCurrentUser().name + '```';
+            slack_obj['text'] = '```' + method + ': ' + text + ' ' + env + ' ' + runtime.getCurrentUser().name + '```';
             if (error) {
                 slack_obj['text'] += ' <!here>';
             }
@@ -43,6 +43,58 @@ define(['N/email', 'N/error', 'N/file', 'N/https', 'N/record', 'N/runtime', 'N/s
                         name: 'MISSING_REQ_ARG',
                         message: 'Missing a required argument: [' + argNames[i] + '] for method: ' + methodName
                     });
+        }
+
+        function doCustCheck(email) {
+            doValidation(email, 'email', 'POST');
+            log.debug('POST', 'Customer ' + email);
+
+            try {
+                var emailObj = {};
+                var emails = [];
+
+                var searchResults = search.create({
+                    "type": "customer",
+                    "columns": [search.createColumn({
+                        "name": "internalid"
+                    }),
+                        search.createColumn({
+                            "name": "entityid"
+                        })],
+                    "filters": [search.createFilter({
+                        "name": "email",
+                        "operator": "is",
+                        "values": email
+                    })]
+                });
+                searchResults.run().each(function (result) {
+                    log.debug('Results', result);
+                    if (result === null) {
+                        emailObj = {};
+
+                    } else {
+                        emailObj = {
+                            'internalid': result.getValue({
+                                'name': 'internalid'
+                            }),
+                            'name': result.getValue({
+                                'name': 'entityid'
+                            })
+                        };
+                        emails.push(emailObj);
+                    }
+                    return true;
+                });
+                log.debug('Emails', emails);
+                return emails;
+
+            } catch (e) {
+                log.error(e.name);
+                throw error.create({
+                    name: 'FAILURE_POST_RETURN',
+                    message: 'Failure to return Obj' + e
+                });
+            }
         }
 
         /**
@@ -94,6 +146,7 @@ define(['N/email', 'N/error', 'N/file', 'N/https', 'N/record', 'N/runtime', 'N/s
                     id: context.id,
                     isDynamic: false,
                     defaultValues: {
+                        entity: context.fields.entity,
                         subsidiary: context.fields.subsidiary
                     }
                 });
@@ -113,17 +166,15 @@ define(['N/email', 'N/error', 'N/file', 'N/https', 'N/record', 'N/runtime', 'N/s
                 var cc_fields = search.lookupFields({
                     type: context.type,
                     id: recordId,
-                    columns: ['status', 'tranid', 'entity', 'subsidiary', 'internalid', 'externalid', 'authcode', 'pnrefnum', 'paymenteventholdreason', 'paymenteventresult', 'amount']
+                    columns: ['tranid', 'internalid', 'authcode', 'pnrefnum', 'paymenteventholdreason', 'paymenteventresult']
                 });
 
                 var time = new Date().toTimeString().replace(/.*(\d{2}:\d{2}:\d{2}).*/, "$1");
                 log.debug('Time', time);
-                sendToSlack('PUT_SUCCESS', [time, context.type, cc_fields.tranid, cc_fields.amount, cc_fields.paymenteventresult, cc_fields.paymenteventholdreason]);
-
                 return cc_fields;
             } catch (e) {
                 log.error('Error', e);
-                sendToSlack('PUT_FAIL', [time, context.type, context.id, e.name, e.type, e.message], false);
+                sendToSlack('PUT_FAIL', [time, context.type, context.id, e.name, e.type, e.message], true);
             }
         }
 
@@ -146,7 +197,18 @@ define(['N/email', 'N/error', 'N/file', 'N/https', 'N/record', 'N/runtime', 'N/s
             sendToSlack('POST', [time, context.type]);
 
             try {
-                if (context.customer) {
+                if (!context.fields.entity){
+                    var emailCheck = doCustCheck(context.customer.fields.email);
+                    log.debug('Email', context.customer.fields.email);
+                    log.debug('DEBUG', emailCheck);
+                }
+            } catch (e) {
+                log.error(e);
+                return e;
+            }
+
+            try {
+                if (!context.fields.entity && emailCheck.length == 0 && context.customer) {
                     custRecord = record.create({
                         type: 'customer',
                         isDynamic: true,
@@ -191,33 +253,33 @@ define(['N/email', 'N/error', 'N/file', 'N/https', 'N/record', 'N/runtime', 'N/s
                     }
                     //creditcard fields
                     if (context.customer.creditcards) {
-                    for (var line in context.customer.creditcards) {
-                        log.debug('Line', line);
-                        log.debug('CC value', context.customer.creditcards[line]);
-                        custRecord.selectNewLine({
-                            sublistId: 'creditcards'
-                        });
-                        for (var cc_key in context.customer.creditcards[line]) {
-                            log.debug('CC Key', cc_key);
-                            
-                            var cc_value = (cc_key == 'ccexpiredate') ? new Date(context.customer.creditcards[line][cc_key]) : context.customer.creditcards[line][cc_key];
-                            log.debug('CC Value', cc_value);
-
-                            custRecord.setCurrentSublistValue({
-                                sublistId: 'creditcards',
-                                fieldId: cc_key,
-                                value: cc_value
+                        for (var line in context.customer.creditcards) {
+                            log.debug('Line', line);
+                            log.debug('CC value', context.customer.creditcards[line]);
+                            custRecord.selectNewLine({
+                                sublistId: 'creditcards'
                             });
-                            
-                        	if (cc_key != 'ccnumber'){
-                            log.debug('CC Key + Value', [cc_key, context.customer.creditcards[line][cc_key]]);
+                            for (var cc_key in context.customer.creditcards[line]) {
+                                log.debug('CC Key', cc_key);
+
+                                var cc_value = (cc_key == 'ccexpiredate') ? new Date(context.customer.creditcards[line][cc_key]) : context.customer.creditcards[line][cc_key];
+                                log.debug('CC Value', cc_value);
+
+                                custRecord.setCurrentSublistValue({
+                                    sublistId: 'creditcards',
+                                    fieldId: cc_key,
+                                    value: cc_value
+                                });
+
+                                if (cc_key != 'ccnumber') {
+                                    log.debug('CC Key + Value', [cc_key, context.customer.creditcards[line][cc_key]]);
+                                }
                             }
+                            custRecord.commitLine({
+                                sublistId: 'creditcards'
+                            });
                         }
-                        custRecord.commitLine({
-                            sublistId: 'creditcards'
-                        });
                     }
-                }
 
                     custId = custRecord.save({
                         enableSourcing: false,
@@ -226,9 +288,13 @@ define(['N/email', 'N/error', 'N/file', 'N/https', 'N/record', 'N/runtime', 'N/s
                     log.debug('Customer ID', custId);
                 }
                 //begin record create
+                if (context.fields.entity) {
+                    var customer = context.fields.entity;
+                } else {
+                    customer = (emailCheck.length > 0) ? emailCheck[0].internalid : custId;
+                }
 
-                //var customer = custId ? custId : context.fields.entity;
-                var customer = context.fields.entity ? context.fields.entity : custId;
+                log.debug('DEBUG','Rec Create ' + customer);
 
                 var objRecord = record.create({
                     type: context.type,
@@ -291,54 +357,51 @@ define(['N/email', 'N/error', 'N/file', 'N/https', 'N/record', 'N/runtime', 'N/s
                 log.debug('Time', time);
                 sendToSlack('POST_SUCCESS', [time, context.type, cc_fields.tranid, cc_fields.amount, cc_fields.paymenteventresult, cc_fields.paymenteventholdreason]);
                 return cc_fields;
-            }
-
-            catch (e) {
-                log.error('Error', e);                
+            } catch (e) {
+                log.error('Error', e);
                 log.debug('Context Error', context.fields.externalid);
-                                                           
-                if (e.name == "DUP_RCRD"){
-                	var internalid = {};
 
-    				var searchResults = search.create({
-    					"type": "salesorder",
-    					"columns": [search.createColumn({
-    						"name": "internalid"
-    					})],
-    					"filters": [search.createFilter({
-    						"name": "externalid",
-    						"operator": "is",
-    						"values": context.fields.externalid
-    					})]
-    				});
-    				searchResults.run().each(function(result) {
-    					log.debug('Results', result);
-    					if (result === null) {
-    						internalid = {};
-    					} else {
-    						internalid = {
-    							'internalid': result.id,
-    						};
-    					}
-    					return true;
-    				});
-    			
-                	
-                	var dup = {};
-                	dup.duplicateid = internalid;
-                	dup.error = e;
-                	
+                if (e.name == "DUP_RCRD") {
+                    var internalid = {};
+
+                    var searchResults = search.create({
+                        "type": "salesorder",
+                        "columns": [search.createColumn({
+                            "name": "internalid"
+                        })],
+                        "filters": [search.createFilter({
+                            "name": "externalid",
+                            "operator": "is",
+                            "values": context.fields.externalid
+                        })]
+                    });
+                    searchResults.run().each(function (result) {
+                        log.debug('Results', result);
+                        if (result === null) {
+                            internalid = {};
+                        } else {
+                            internalid = {
+                                'internalid': result.id,
+                            };
+                        }
+                        return true;
+                    });
+
+
+                    var dup = {};
+                    dup.duplicateid = internalid;
+                    dup.error = e;
+
                     sendToSlack('POST_FAIL', [time, context.type, internalid.internalid, e.name, e.type, e.message], false);
 
-                	return dup;
+                    return dup;
                 } else {
-                var error = {}
-                error.error = e;
-                sendToSlack('POST_FAIL', [time, context.type, context.id, e.name, e.type, e.message], false);
-                return error; 
+                    var error = {}
+                    error.error = e;
+                    sendToSlack('POST_FAIL', [time, context.type, context.id, e.name, e.type, e.message], false);
+                    return error;
                 }
             }
-
         }
 
         /**
