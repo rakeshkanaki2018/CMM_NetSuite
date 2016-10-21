@@ -45,7 +45,7 @@ define(['N/email', 'N/error', 'N/file', 'N/https', 'N/record', 'N/runtime', 'N/s
                     });
         }
 
-        function doCustCheck(email) {
+        function doCustCheck(email, subsidiary) {
             doValidation(email, 'email', 'POST');
             log.debug('POST', 'Customer ' + email);
 
@@ -65,6 +65,11 @@ define(['N/email', 'N/error', 'N/file', 'N/https', 'N/record', 'N/runtime', 'N/s
                         "name": "email",
                         "operator": "is",
                         "values": email
+                    }),
+                    search.createFilter({
+                        "name": "subsidiary",
+                        "operator": "is",
+                        "values": subsidiary
                     })]
                 });
                 searchResults.run().each(function (result) {
@@ -198,7 +203,7 @@ define(['N/email', 'N/error', 'N/file', 'N/https', 'N/record', 'N/runtime', 'N/s
 
             try {
                 if (!context.fields.entity){
-                    var emailCheck = doCustCheck(context.customer.fields.email);
+                    var emailCheck = doCustCheck(context.customer.fields.email, context.fields.subsidiary);
                     log.debug('Email', context.customer.fields.email);
                     log.debug('DEBUG', emailCheck);
                 }
@@ -392,13 +397,13 @@ define(['N/email', 'N/error', 'N/file', 'N/https', 'N/record', 'N/runtime', 'N/s
                     dup.duplicateid = internalid;
                     dup.error = e;
 
-                    sendToSlack('POST_FAIL', [time, context.type, internalid.internalid, e.name, e.type, e.message], false);
+                    sendToSlack('POST_FAIL', [time, context.type, internalid.internalid, e.name, e.type, e.message], true);
 
                     return dup;
                 } else {
                     var error = {}
                     error.error = e;
-                    sendToSlack('POST_FAIL', [time, context.type, context.id, e.name, e.type, e.message], false);
+                    sendToSlack('POST_FAIL', [time, context.type, context.id, e.name, e.type, e.message], true);
                     return error;
                 }
             }

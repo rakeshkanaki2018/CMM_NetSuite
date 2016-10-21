@@ -3,13 +3,19 @@
  * @NScriptType UserEventScript
  * @NModuleScope SameAccount
  */
-define(['N/record', 'N/search', 'N/log', 'N/email'],
+define(['N/email', 'N/error', 'N/file', 'N/http', 'N/https', 'N/record', 'N/runtime', 'N/search'],
 /**
+ * @param {email} email
+ * @param {error} error
+ * @param {file} file
+ * @param {http} http
+ * @param {https} https
  * @param {record} record
+ * @param {runtime} runtime
  * @param {search} search
  */
-function(record, search, log, email) {
-
+function(email, error, file, http, https, record, runtime, search) {
+   
     /**
      * Function definition to be triggered before record is loaded.
      *
@@ -19,47 +25,8 @@ function(record, search, log, email) {
      * @param {Form} scriptContext.form - Current form
      * @Since 2015.2
      */
-    function beforeLoad(context) {
-    	try {
-    	var id = context.newRecord.id;
-    	log.debug('ID', [id, typeof(id)]);
-    	//return;
-    	//if (id != 147489) return;
-    	log.debug('Search attempt', id);
+    function beforeLoad(scriptContext) {
 
-    	var emails = [];
-    	var contactSearch = search.create({
-            type: search.Type.CONTACT,
-            columns: ['entity', 'subsidiary', 'name', 'email'],
-            filters: [
-                ['company', 'is', id],
-                'and', ['subsidiary', 'is', 4]
-                ]
-                });
-    	log.debug('Create Search', id);
-
-    	contactSearch.run().each(function(result) {
-    	    var entity = result.getValue({
-    	        name: 'entity'
-    	    });
-    	    var subsidiary = result.getValue({
-    	        name: 'subsidiary'
-    	    });
-    	    var email = result.getValue({
-    	        name: 'email'
-    	    });
-        	log.debug('Push attempt', email);
-
-    	    emails.push(email);
-
-    	    return true;
-    	});
-    	log.debug('Emails', emails);
-
-    	return;
-    	} catch (e) {
-    		log.error('Error', e);
-    	}
     }
 
     /**
@@ -85,7 +52,7 @@ function(record, search, log, email) {
      * @Since 2015.2
      */
     function afterSubmit(scriptContext) {
-
+    	
     }
 
     return {
@@ -93,5 +60,5 @@ function(record, search, log, email) {
         beforeSubmit: beforeSubmit,
         afterSubmit: afterSubmit
     };
-
+    
 });

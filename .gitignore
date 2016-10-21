@@ -192,3 +192,7 @@ local.properties
 
 # Code Recommenders
 .recommenders/
+
+restlet_test.py
+
+restlet_inv_test.py
