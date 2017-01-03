@@ -196,3 +196,7 @@ local.properties
 restlet_test.py
 
 restlet_inv_test.py
+
+node_SOAP/
+
+*.py
