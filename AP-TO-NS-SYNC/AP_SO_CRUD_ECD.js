@@ -24,6 +24,27 @@ define(['N/http', 'N/https', 'N/record', 'N/render', 'N/runtime', 'N/search', 'N
                 return null;
             }
             return input.replace(ptrn, '$2/$3/$1');
+
+            //return input.replace(ptrn, '$2/$3/$1');
+        };
+
+        var ship_methods = {
+            "USPS Ground (8-12 Business Days)": 23549,
+            "Fedex Ground (3-5 Business Days)": 23550,
+            "Fedex Express (2-3 Business Day Air)": 23551,
+            "Pickup": 23552,
+            "International Fedex Economy": 23553,
+            "International Fedex Priority": 23554,
+            "Fedex Priority (Next Business Day)": 23555,
+            "Fedex Ground (5-8 Business Days)": 23557,
+            "APO - FedEx SmartPost": 23558,
+            "Ground (3-5 Business Days)": 23550,
+            "Express (2-3 Business Day Air)": 23551,
+            "International Economy": 23553,
+            "International Priority": 23554,
+            "Priority (Next Business Day)": 23555,
+            "Ground (5-8 Business Days)": 23557,
+            "APO - USPS": 23558
         };
 
         function sendToSlack(method, text, error) {
@@ -47,7 +68,7 @@ define(['N/http', 'N/https', 'N/record', 'N/render', 'N/runtime', 'N/search', 'N
 
 
         function doCustCheck(email) {
-        	sendToSlack('EMAIL_CONTEXT', [time, email], false);
+            sendToSlack('EMAIL_CONTEXT', [time, email], false);
 
             doValidation(email, 'email', 'POST');
             log.debug('POST', 'Customer Check: ' + email);
@@ -89,7 +110,7 @@ define(['N/http', 'N/https', 'N/record', 'N/render', 'N/runtime', 'N/search', 'N
                     return true;
                 });
                 log.debug('Emails Return: ', emails);
-            	sendToSlack('EMAIL_ARRAY', [time, emails], false);
+                sendToSlack('EMAIL_ARRAY', [time, emails], false);
                 return emails;
 
             } catch (e) {
@@ -267,29 +288,35 @@ define(['N/http', 'N/https', 'N/record', 'N/render', 'N/runtime', 'N/search', 'N
             }
         }
 
-        function updateAPOrderID(soId, nsId){
+        function updateAPOrderID(soId, nsId) {
 
-        	var orderObj = {};
-        	orderObj[soId] = {
-        			"ns_order_id": nsId.toString(),
-        			"status": 1
-        	};
+            try {
+                var headers = {
+                    'Content-Type': 'application/json'
+                };
 
-        	log.debug(orderObj);
-            sendToSlack('UPDATE', JSON.stringify(orderObj), false);
+                var orderObj = {};
+                orderObj[soId] = {
+                    "ns_order_id": nsId,
+                    "status": 1
+                };
+
+                var request = https.post({
+                    url: 'https://admin.erincondren.com/workflow_api/update_ns_id',
+                    headers: headers,
+                    body: JSON.stringify(orderObj)
+                });
+
+                sendToSlack('UPDATE', [soId, nsId], false);
 
 
-            /*var request = https.post({
-                url: 'https://admin.erincondren.com/workflow_api/update_ns_id',
-                body: soID
-            });*/
+            } catch (e) {
 
-            /*
-            {"1843124":{"ns_order_id":"17969775","status":1},
-            "1843123":{"ns_order_id":"17969778","status":1},
-            	}
-            */
-            // need to test and debug ..
+                log.error('POST_ERROR', e);
+
+                sendToSlack('POST_ERROR', [soId, nsId], true);
+
+            }
         }
 
 
@@ -308,11 +335,10 @@ define(['N/http', 'N/https', 'N/record', 'N/render', 'N/runtime', 'N/search', 'N
             var response = https.get({
                 url: 'https://admin.erincondren.com/workflow_api/pending_ns_order'
             });
-            log.debug(response.code);
+            log.debug('pending_ns_order', response.code);
 
             var apObject = JSON.parse(response.body);
-            log.debug('object', apObject);
-            log.debug('length', apObject.length);
+
             sendToSlack('GETINPUTDATA', 'Orders: ' + apObject.length, false);
 
             return apObject;
@@ -327,19 +353,16 @@ define(['N/http', 'N/https', 'N/record', 'N/render', 'N/runtime', 'N/search', 'N
          */
         function map(context) {
 
-            //log.debug('Map Stage 1', context);
-
             var apObject = JSON.parse(context.value);
-            //log.debug('Context 1', apObject);
             try {
                 var salesOrder = record.create({
                     type: record.Type.SALES_ORDER,
                     isDynamic: false
                 });
-                salesOrder.setValue('custbody_ap_json', JSON.stringify(apObject));  // ECD ANONYMOUS CUSTOMER
 
-                salesOrder.setValue('externalid', 'E-' + apObject['order_id']);
+                salesOrder.setValue('customform', 197); // ECD Sales Order Form
 
+                salesOrder.setValue('externalid', 'EC-' + apObject['order_id']);
 
                 salesOrder.setValue('entity', 945);  // ECD ANONYMOUS CUSTOMER
                 salesOrder.setValue('trandate', new Date(Date.parse((apObject['order_date']).replace(/-/g, '/'))));
@@ -347,16 +370,25 @@ define(['N/http', 'N/https', 'N/record', 'N/render', 'N/runtime', 'N/search', 'N
 
                 salesOrder.setValue('custbody_mapreduce', true);
 
-                salesOrder.setValue('orderstatus', 'B');
+                salesOrder.setValue('orderstatus', 'B'); // 'A' keeps it as Pending Approval -- prevents WOs from being generated
 
 
-                salesOrder.setValue('shipmethod', 23418); // Generic Shipping
+                salesOrder.setValue('shipmethod', ship_methods[apObject['shipping_method_name']]); // lookup table..
+
+                var parsedDateStringAsRawDateObject = format.parse({
+                    value: toMmDdYy(apObject['estimated_ship_date']),
+                    type: format.Type.DATE
+                });
+
+                salesOrder.setValue('shipdate', parsedDateStringAsRawDateObject); // Generic Shipping
 
                 salesOrder.setValue('shippingcost', (apObject['shipping_amount'] - apObject['shipping_discount']));
 
-                salesOrder.setValue('pnrefnum', apObject['transaction_key'][0]); // Request ID
+                salesOrder.setValue('custbody_ad_authnet_dep_id', apObject['transaction_key'].toString()); // Request ID
 
-                salesOrder.setValue('discountitem', 62468); // ECD Discount Item
+                //salesOrder.setValue('pnrefnum', apObject['transaction_key'][0]); // Request ID
+
+                salesOrder.setValue('discountitem', 62468); // ECD Discount Item .. Applies before tax
                 salesOrder.setValue('discountrate', -1 * (apObject['discount']));
 
                 if (apObject['production_state'] == "1") {
@@ -365,7 +397,6 @@ define(['N/http', 'N/https', 'N/record', 'N/render', 'N/runtime', 'N/search', 'N
                     salesOrder.setValue('location', 14); // LA
                 }
 
-                // (discount total + shipping discount) * -1
                 var billaddress = "";
                 billaddress += apObject['billing_info'][0]['first_name'] + ' ' + apObject['billing_info'][0]['last_name'] + ' \n';
                 billaddress += apObject['billing_info'][0]['address1'] + ' \n';
@@ -375,7 +406,6 @@ define(['N/http', 'N/https', 'N/record', 'N/render', 'N/runtime', 'N/search', 'N
                 billaddress += apObject['billing_info'][0]['country_name'] + ' \n';
                 billaddress += apObject['billing_info'][0]['country_code'] + ' \n';
                 billaddress += apObject['billing_info'][0]['phone'] + ' \n';
-
 
                 var shipaddress = "";
                 shipaddress += apObject['shipping_info']['first_name'] + ' ' + apObject['shipping_info']['last_name'] + ' \n';
@@ -390,7 +420,7 @@ define(['N/http', 'N/https', 'N/record', 'N/render', 'N/runtime', 'N/search', 'N
                 salesOrder.setValue('billaddress', billaddress); // bill address
                 salesOrder.setValue('shipaddress', shipaddress); // ship address
 
-                salesOrder.setValue('memo', JSON.stringify(apObject['customer_info'])); // customer information
+                //salesOrder.setValue('memo', JSON.stringify(apObject['customer_info'])); // customer information
 
                 var taxcode = -8; // Not Taxable
 
@@ -418,8 +448,8 @@ define(['N/http', 'N/https', 'N/record', 'N/render', 'N/runtime', 'N/search', 'N
 
                 if (apObject.item_info) {
                     for (var line in apObject.item_info) {
-                        if (apObject.item_info[line]['netsuite_id'] == null) {
-                            // sendToSlack('MAP ERROR', ['AP#' + apObject['order_id'], 'Item is null', apObject.item_info[line]['product_name']], false);
+                        if ((apObject.item_info[line]['netsuite_id'] == null) || (apObject.item_info[line]['netsuite_id'] == 0)) {
+                            sendToSlack('MAP_ERROR', [apObject['order_id'], ' Item is null ', [apObject.item_info[line]['product_id'], apObject.item_info[line]['product_name']]], true);
                             return;
                         }
 
@@ -476,7 +506,7 @@ define(['N/http', 'N/https', 'N/record', 'N/render', 'N/runtime', 'N/search', 'N
                 // apply giftcard
                 if (apObject['gift_certificate_amount'] > 0) {
 
-                    log.debug('GC ' + apObject['order_id'], apObject['gift_certificate_amount'].toString());
+                    //log.debug('GC ' + apObject['order_id'], apObject['gift_certificate_amount'].toString());
 
 
                     salesOrder.setSublistValue({
@@ -500,7 +530,7 @@ define(['N/http', 'N/https', 'N/record', 'N/render', 'N/runtime', 'N/search', 'N
                         line: extra_lines
                     });
 
-                    log.debug('GC ' + apObject['order_id'], (-1 * apObject['gift_certificate_amount']).toString());
+                    //log.debug('GC ' + apObject['order_id'], (-1 * apObject['gift_certificate_amount']).toString());
 
                     salesOrder.setSublistValue({
                         sublistId: 'item',
@@ -513,55 +543,55 @@ define(['N/http', 'N/https', 'N/record', 'N/render', 'N/runtime', 'N/search', 'N
 
                 // apply shipping cost -- might be better to apply it to the shippingcost line?
                 /*
-                if (apObject['shipping_amount'] > 0) {
+                 if (apObject['shipping_amount'] > 0) {
 
-                    log.debug('SH ' + apObject['order_id'], apObject['shipping_amount'].toString());
+                 log.debug('SH ' + apObject['order_id'], apObject['shipping_amount'].toString());
 
 
-                    salesOrder.setSublistValue({
-                        sublistId: 'item',
-                        fieldId: 'item',
-                        value: 64892, // item internalid
-                        line: extra_lines
-                    });
+                 salesOrder.setSublistValue({
+                 sublistId: 'item',
+                 fieldId: 'item',
+                 value: 64892, // item internalid
+                 line: extra_lines
+                 });
 
-                    salesOrder.setSublistValue({
-                        sublistId: 'item',
-                        fieldId: 'price',
-                        value: -1, // custom price level
-                        line: extra_lines
-                    });
+                 salesOrder.setSublistValue({
+                 sublistId: 'item',
+                 fieldId: 'price',
+                 value: -1, // custom price level
+                 line: extra_lines
+                 });
 
-                    salesOrder.setSublistValue({
-                        sublistId: 'item',
-                        fieldId: 'amount',
-                        value: apObject['shipping_amount'].toString(), // item price
-                        line: extra_lines
-                    });
+                 salesOrder.setSublistValue({
+                 sublistId: 'item',
+                 fieldId: 'amount',
+                 value: apObject['shipping_amount'].toString(), // item price
+                 line: extra_lines
+                 });
 
-                    log.debug('SH ' + apObject['order_id'], (-1 * apObject['shipping_amount']).toString());
+                 log.debug('SH ' + apObject['order_id'], (-1 * apObject['shipping_amount']).toString());
 
-                    salesOrder.setSublistValue({
-                        sublistId: 'item',
-                        fieldId: 'taxcode',
-                        value: taxcode,
-                        line: extra_lines
-                    });
+                 salesOrder.setSublistValue({
+                 sublistId: 'item',
+                 fieldId: 'taxcode',
+                 value: taxcode,
+                 line: extra_lines
+                 });
 
-                    salesOrder.setSublistValue({
-                        sublistId: 'item',
-                        fieldId: 'taxrate1',
-                        value: shiptaxrate,
-                        line: extra_lines
-                    });
+                 salesOrder.setSublistValue({
+                 sublistId: 'item',
+                 fieldId: 'taxrate1',
+                 value: shiptaxrate,
+                 line: extra_lines
+                 });
 
-                    extra_lines++;
-                }*/
+                 extra_lines++;
+                 }*/
 
                 // apply priority processing fees
                 if (apObject['priority_processing_fees'] > 0) {
 
-                    log.debug('PPF ' + apObject['order_id'], apObject['priority_processing_fees'].toString());
+                    //log.debug('PPF ' + apObject['order_id'], apObject['priority_processing_fees'].toString());
 
 
                     salesOrder.setSublistValue({
@@ -585,7 +615,7 @@ define(['N/http', 'N/https', 'N/record', 'N/render', 'N/runtime', 'N/search', 'N
                         line: extra_lines
                     });
 
-                    log.debug('SD ' + apObject['order_id'], (-1 * apObject['priority_processing_fees']).toString());
+                    //log.debug('SD ' + apObject['order_id'], (-1 * apObject['priority_processing_fees']).toString());
 
                     salesOrder.setSublistValue({
                         sublistId: 'item',
@@ -607,72 +637,101 @@ define(['N/http', 'N/https', 'N/record', 'N/render', 'N/runtime', 'N/search', 'N
 
                 // apply shipping discount
                 /*
-                if (apObject['shipping_discount'] > 0) {
+                 if (apObject['shipping_discount'] > 0) {
 
-                    log.debug('SD ' + apObject['order_id'], apObject['shipping_discount'].toString());
-
-
-                    salesOrder.setSublistValue({
-                        sublistId: 'item',
-                        fieldId: 'item',
-                        value: 62467, // item internalid
-                        line: extra_lines
-                    });
-
-                    salesOrder.setSublistValue({
-                        sublistId: 'item',
-                        fieldId: 'price',
-                        value: -1, // custom price level
-                        line: extra_lines
-                    });
-
-                    salesOrder.setSublistValue({
-                        sublistId: 'item',
-                        fieldId: 'amount',
-                        value: (-1 * apObject['shipping_discount']).toString(), // item price
-                        line: extra_lines
-                    });
-
-                    log.debug('SD ' + apObject['order_id'], (-1 * apObject['shipping_discount']).toString());
-
-                    salesOrder.setSublistValue({
-                        sublistId: 'item',
-                        fieldId: 'taxcode',
-                        value: taxcode, // not taxable
-                        line: extra_lines
-                    });
-
-                    salesOrder.setSublistValue({
-                        sublistId: 'item',
-                        fieldId: 'taxrate1',
-                        value: shiptaxrate,
-                        line: extra_lines
-                    });
+                 log.debug('SD ' + apObject['order_id'], apObject['shipping_discount'].toString());
 
 
-                    extra_lines++;
-                }
-                */
+                 salesOrder.setSublistValue({
+                 sublistId: 'item',
+                 fieldId: 'item',
+                 value: 62467, // item internalid
+                 line: extra_lines
+                 });
+
+                 salesOrder.setSublistValue({
+                 sublistId: 'item',
+                 fieldId: 'price',
+                 value: -1, // custom price level
+                 line: extra_lines
+                 });
+
+                 salesOrder.setSublistValue({
+                 sublistId: 'item',
+                 fieldId: 'amount',
+                 value: (-1 * apObject['shipping_discount']).toString(), // item price
+                 line: extra_lines
+                 });
+
+                 log.debug('SD ' + apObject['order_id'], (-1 * apObject['shipping_discount']).toString());
+
+                 salesOrder.setSublistValue({
+                 sublistId: 'item',
+                 fieldId: 'taxcode',
+                 value: taxcode, // not taxable
+                 line: extra_lines
+                 });
+
+                 salesOrder.setSublistValue({
+                 sublistId: 'item',
+                 fieldId: 'taxrate1',
+                 value: shiptaxrate,
+                 line: extra_lines
+                 });
+
+
+                 extra_lines++;
+                 }
+                 */
 
                 // AP JSON Check
-                salesOrder.setValue('custbody_ap_order_total', apObject['total'].toString()); // ECD Discount Item
-                salesOrder.setValue('custbody_ap_tax_total', apObject['tax'].toString()); // ECD Discount Item
-                salesOrder.setValue('custbody_ap_ship_discount', apObject['shipping_discount'].toString()); // ECD Discount Item
-                salesOrder.setValue('custbody_ap_ship_tax', apObject['shipping_tax'].toString()); // ECD Discount Item
+
+                salesOrder.setValue('custbody_ns_crud_mr', true);
+
+                salesOrder.setValue('custbody_ap_json', JSON.stringify(apObject));  // ECD ANONYMOUS CUSTOMER
+
+                salesOrder.setValue('custbody_ap_billing_info', JSON.stringify(apObject['billing_info']));
+                salesOrder.setValue('custbody_ap_bill_zip', apObject['billing_info'][0]['zip']);
+                salesOrder.setValue('custbody_ap_ship_info', JSON.stringify(apObject['shipping_info']));
+                salesOrder.setValue('custbody_ap_ship_method', apObject['shipping_method_name']);
+                salesOrder.setValue('custbody_ap_ship_zip', apObject['shipping_info']['zip']);
+                salesOrder.setValue('custbody_ap_shipping_tax', apObject['shipping_tax'].toString());
+                salesOrder.setValue('custbody_ap_tax_total', apObject['tax'].toString());
+                salesOrder.setValue('custbody_ap_total_discount', apObject['discount'].toString());
+                salesOrder.setValue('custbody_ap_shipping_disc', apObject['shipping_discount'].toString());
+                salesOrder.setValue('custbody_ap_order_total', apObject['total'].toString());
+                salesOrder.setValue('custbody_ap_shipping_amt', apObject['tax'].toString());
 
 
-                var soId = salesOrder.save({
+                var nsId = salesOrder.save({
                     enableSourcing: false,
                     ignoreMandatoryFields: false
                 });
 
-                updateAPOrderID(apObject['order_id'], soId);
+                sendToSlack('MAP', [apObject['order_id'], nsId, apObject['shipping_info']['state'], 'https://system.na1.netsuite.com/app/accounting/transactions/salesord.nl?id=' + nsId], false);
 
-                sendToSlack('MAP', ['GC: ' + apObject['gift_certificate_amount'], apObject['order_id'], soId, apObject['shipping_info']['state'], 'https://system.sandbox.netsuite.com/app/accounting/transactions/salesord.nl?id=' + soId], false);
+                updateAPOrderID(apObject['order_id'], nsId)
 
             } catch (e) {
-                log.debug('Error', e);
-                //sendToSlack('MAP ERROR', ['GC:'+ apObject['gift_certificate_amount'],apObject['order_id'], e.message], false);
+                log.error('Map Error', e);
+
+                if (e.name == "DUP_RCRD") {
+
+                    var searchResults = search.global({
+                        keywords: 'sales: ' + apObject['order_id']
+                    });
+
+                    log.debug([searchResults[0].id, searchResults[0].getValue("info1")]);
+
+                    if (searchResults[0].getValue("info1") == "945 ECD ANONYMOUS WEB SITE CUSTOMER") {
+                        updateAPOrderID(apObject['order_id'], searchResults[0].id);
+                    }
+
+                    sendToSlack('DUP_RCRD', [apObject['order_id'], e.name, e.message], false);
+
+                } else {
+                    sendToSlack('MAP_ERROR', [apObject['order_id'], e.name, e.message], false);
+                }
             }
         }
 
