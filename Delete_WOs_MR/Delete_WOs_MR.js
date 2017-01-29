@@ -23,7 +23,7 @@ define(['N/search', 'N/record', 'N/email', 'N/runtime', 'N/error'],
                 log.debug('WO', woId);
 
                 var objRecord = record.delete({
-                    type: record.Type.WORK_ORDER_ISSUE,
+                    type: record.Type.WORK_ORDER_CLOSE,
                     id: woId
                 });
 

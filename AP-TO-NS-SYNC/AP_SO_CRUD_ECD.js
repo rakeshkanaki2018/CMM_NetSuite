@@ -695,12 +695,12 @@ define(['N/http', 'N/https', 'N/record', 'N/render', 'N/runtime', 'N/search', 'N
                 salesOrder.setValue('custbody_ap_ship_info', JSON.stringify(apObject['shipping_info']));
                 salesOrder.setValue('custbody_ap_ship_method', apObject['shipping_method_name']);
                 salesOrder.setValue('custbody_ap_ship_zip', apObject['shipping_info']['zip']);
-                salesOrder.setValue('custbody_ap_shipping_tax', apObject['shipping_tax'].toString());
-                salesOrder.setValue('custbody_ap_tax_total', apObject['tax'].toString());
-                salesOrder.setValue('custbody_ap_total_discount', apObject['discount'].toString());
-                salesOrder.setValue('custbody_ap_shipping_disc', apObject['shipping_discount'].toString());
-                salesOrder.setValue('custbody_ap_order_total', apObject['total'].toString());
-                salesOrder.setValue('custbody_ap_shipping_amt', apObject['tax'].toString());
+                salesOrder.setValue('custbody_ap_shipping_tax', apObject['shipping_tax']);
+                salesOrder.setValue('custbody_ap_tax_total', apObject['tax']);
+                salesOrder.setValue('custbody_ap_total_discount', apObject['discount']);
+                salesOrder.setValue('custbody_ap_shipping_disc', apObject['shipping_discount']);
+                salesOrder.setValue('custbody_ap_order_total', apObject['total']);
+                salesOrder.setValue('custbody_ap_shipping_amt', apObject['tax']);
 
 
                 var nsId = salesOrder.save({
