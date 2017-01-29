@@ -3,7 +3,7 @@
  * @NScriptType Restlet
  * @NModuleScope SameAccount
  */
-define(['N/email', 'N/error', 'N/file', 'N/https', 'N/record', 'N/runtime', 'N/search', 'N/transaction'],
+define(['N/email', 'N/error', 'N/file', 'N/https', 'N/record', 'N/runtime', 'N/search', 'N/transaction', 'N/log'],
     /**
      * @param {email} email
      * @param {error} error
@@ -14,7 +14,7 @@ define(['N/email', 'N/error', 'N/file', 'N/https', 'N/record', 'N/runtime', 'N/s
      * @param {search} search
      * @param {transaction} transaction
      */
-    function (email, error, file, https, record, runtime, search, transaction) {
+    function (email, error, file, https, record, runtime, search, transaction, log) {
         var time = new Date().toTimeString().replace(/.*(\d{2}:\d{2}:\d{2}).*/, "$1");
 
         function sendToSlack(method, text, error) {
@@ -66,11 +66,11 @@ define(['N/email', 'N/error', 'N/file', 'N/https', 'N/record', 'N/runtime', 'N/s
                         "operator": "is",
                         "values": email
                     }),
-                    search.createFilter({
-                        "name": "subsidiary",
-                        "operator": "is",
-                        "values": subsidiary
-                    })]
+                        search.createFilter({
+                            "name": "subsidiary",
+                            "operator": "is",
+                            "values": subsidiary
+                        })]
                 });
                 searchResults.run().each(function (result) {
                     log.debug('Results', result);
@@ -99,6 +99,94 @@ define(['N/email', 'N/error', 'N/file', 'N/https', 'N/record', 'N/runtime', 'N/s
                     name: 'FAILURE_POST_RETURN',
                     message: 'Failure to return Obj' + e
                 });
+            }
+        }
+
+        function doCustUpdate(context, id) {
+            try {
+                custUpdate = record.load({
+                    type: record.Type.CUSTOMER,
+                    id: id,
+                    isDynamic: true
+                });
+                log.debug('doCustUpdate', custUpdate);
+
+                for (var fldName in context.customer.fields) {
+                    if (context.customer.fields.hasOwnProperty(fldName)) {
+                        custUpdate.setValue(fldName, context.customer.fields[fldName]);
+                    }
+                }
+
+                log.debug('doCustUpdate', id);
+                //address fields
+                //address line
+                var addrLineNum = 0;
+                if (context.customer) {
+                    if (context.customer.addressbook) {
+                        for (var address in context.customer.addressbook) {
+                            log.debug('Address #', address);
+                            for (var key in context.customer.addressbook[address]) {
+                                log.debug('Key', [address, key]);
+
+                                custUpdate.selectLine('addressbook', addrLineNum);
+                                if (key == 'defaultbilling' || 'defaultshipping' || 'isresidential') {
+                                    custUpdate.setCurrentSublistValue({
+                                        sublistId: 'addressbook',
+                                        fieldId: key,
+                                        value: context.customer.addressbook[address][key]
+                                    });
+                                    log.debug('K,v', [address, key, context.customer.addressbook[address][key]]);
+                                }
+                                var subRecord = custUpdate.getCurrentSublistSubrecord({
+                                    sublistId: 'addressbook',
+                                    fieldId: 'addressbookaddress'
+                                });
+                                subRecord.setValue(key.slice(0, key.indexOf('_')), context.customer.addressbook[address][key]);
+                                custUpdate.commitLine('addressbook');
+                            }
+                            addrLineNum++;
+                        }
+                    }
+                }
+                //creditcard fields
+                if (context.customer.creditcards) {
+                    for (var line in context.customer.creditcards) {
+                        log.debug('Line', line);
+                        log.debug('CC value', context.customer.creditcards[line]);
+                        custUpdate.selectNewLine({
+                            sublistId: 'creditcards'
+                        });
+                        for (var cc_key in context.customer.creditcards[line]) {
+                            log.debug('CC Key', cc_key);
+
+                            var cc_value = (cc_key == 'ccexpiredate') ? new Date(context.customer.creditcards[line][cc_key]) : context.customer.creditcards[line][cc_key];
+                            log.debug('CC Value', cc_value);
+
+                            custUpdate.setCurrentSublistValue({
+                                sublistId: 'creditcards',
+                                fieldId: cc_key,
+                                value: cc_value
+                            });
+
+                            if (cc_key != 'ccnumber') {
+                                log.debug('CC Key + Value', [cc_key, context.customer.creditcards[line][cc_key]]);
+                            }
+                        }
+                        custUpdate.commitLine({
+                            sublistId: 'creditcards'
+                        });
+                    }
+                }
+                log.debug('Update Cust', 'CC Cards');
+
+                updateId = custUpdate.save({
+                    enableSourcing: false,
+                    ignoreMandatoryFields: false
+                });
+                log.debug('Update Cust', updateId);
+
+            } catch (e) {
+                log.error(e);
             }
         }
 
@@ -202,7 +290,7 @@ define(['N/email', 'N/error', 'N/file', 'N/https', 'N/record', 'N/runtime', 'N/s
             sendToSlack('POST', [time, context.type]);
 
             try {
-                if (!context.fields.entity){
+                if (!context.fields.entity) {
                     var emailCheck = doCustCheck(context.customer.fields.email, context.fields.subsidiary);
                     log.debug('Email', context.customer.fields.email);
                     log.debug('DEBUG', emailCheck);
@@ -218,7 +306,7 @@ define(['N/email', 'N/error', 'N/file', 'N/https', 'N/record', 'N/runtime', 'N/s
                         type: 'customer',
                         isDynamic: true,
                         defaultValue: {
-                            subsidiary: context.fields.subsidiary
+                            subsidiary: 4
                         }
                     });
                     for (var fldName in context.customer.fields) {
@@ -297,16 +385,18 @@ define(['N/email', 'N/error', 'N/file', 'N/https', 'N/record', 'N/runtime', 'N/s
                     var customer = context.fields.entity;
                 } else {
                     customer = (emailCheck.length > 0) ? emailCheck[0].internalid : custId;
+                    log.debug('Update CustId', customer);
+                    doCustUpdate(context, customer);
                 }
 
-                log.debug('DEBUG','Rec Create ' + customer);
 
                 var objRecord = record.create({
-                    type: context.type,
+                    type: "salesorder",
                     isDynamic: false,
                     defaultValues: {
                         entity: customer,
-                        subsidiary: context.fields.subsidiary
+                        subsidiary: 4,
+                        location: 20
                     }
                 });
 
@@ -355,12 +445,12 @@ define(['N/email', 'N/error', 'N/file', 'N/https', 'N/record', 'N/runtime', 'N/s
                 var cc_fields = search.lookupFields({
                     type: 'salesorder',
                     id: recordId,
-                    columns: ['status', 'tranid', 'entity', 'subsidiary', 'internalid', 'externalid', 'authcode', 'pnrefnum', 'paymenteventholdreason', 'paymenteventresult', 'amount']
+                    columns: ['status', 'tranid', 'entity', 'subsidiary', 'internalid', 'externalid', 'authcode', 'pnrefnum', 'paymenteventholdreason', 'paymenteventresult', 'amount', 'paymentevent.holddetails']
                 });
 
                 var time = new Date().toTimeString().replace(/.*(\d{2}:\d{2}:\d{2}).*/, "$1");
                 log.debug('Time', time);
-                sendToSlack('POST_SUCCESS', [time, context.type, cc_fields.tranid, cc_fields.amount, cc_fields.paymenteventresult, cc_fields.paymenteventholdreason]);
+                sendToSlack('POST_SUCCESS', [time, context.type, cc_fields.tranid, cc_fields.amount, cc_fields.paymenteventresult, cc_fields.paymenteventholdreason, cc_fields["paymentevent.holddetails"]]);
                 return cc_fields;
             } catch (e) {
                 log.error('Error', e);
@@ -397,13 +487,13 @@ define(['N/email', 'N/error', 'N/file', 'N/https', 'N/record', 'N/runtime', 'N/s
                     dup.duplicateid = internalid;
                     dup.error = e;
 
-                    sendToSlack('POST_FAIL', [time, context.type, internalid.internalid, e.name, e.type, e.message], true);
+                    sendToSlack('POST_FAIL', [time, context.type, internalid.internalid, e.name, e.type, e.message], false);
 
                     return dup;
                 } else {
                     var error = {}
                     error.error = e;
-                    sendToSlack('POST_FAIL', [time, context.type, context.id, e.name, e.type, e.message], true);
+                    sendToSlack('POST_FAIL', [time, context.type, context.id, e.name, e.type, e.message], false);
                     return error;
                 }
             }
@@ -427,4 +517,5 @@ define(['N/email', 'N/error', 'N/file', 'N/https', 'N/record', 'N/runtime', 'N/s
             'delete': doDelete
         };
 
-    });
+    }
+);

@@ -88,7 +88,7 @@ define(['N/email', 'N/error', 'N/file', 'N/https', 'N/record', 'N/runtime', 'N/s
                     return true;
                 });
                 log.debug('Emails Return: ', emails);
-            	sendToSlack('EMAIL_ARRAY', [time, emails], false);
+            	sendToSlack('EMAIL_ARRAY', [time, JSON.stringify(emails)], false);
                 return emails;
 
             } catch (e) {
@@ -117,7 +117,6 @@ define(['N/email', 'N/error', 'N/file', 'N/https', 'N/record', 'N/runtime', 'N/s
             var time = new Date().toTimeString().replace(/.*(\d{2}:\d{2}:\d{2}).*/, "$1");
 
             log.debug('POST', [time, context.type]);
-            sendToSlack('POST_INIT', [time, context.type, JSON.stringify(context)]);
 
             try {
                 var emailCheck = doCustCheck(context.customer.fields.email);
@@ -179,16 +178,16 @@ define(['N/email', 'N/error', 'N/file', 'N/https', 'N/record', 'N/runtime', 'N/s
                 //creditcard fields
                 if (context.customer.creditcards) {
                     for (var line in context.customer.creditcards) {
-                        log.debug('Line', line);
-                        log.debug('CC value', context.customer.creditcards[line]);
+                        //log.debug('Line', line);
+                        //log.debug('CC value', context.customer.creditcards[line]);
                         custRecord.selectNewLine({
                             sublistId: 'creditcards'
                         });
                         for (var cc_key in context.customer.creditcards[line]) {
-                            log.debug('CC Key', cc_key);
+                            //log.debug('CC Key', cc_key);
 
                             var cc_value = (cc_key == 'ccexpiredate') ? new Date(context.customer.creditcards[line][cc_key]) : context.customer.creditcards[line][cc_key];
-                            log.debug('CC Value', cc_value);
+                            //log.debug('CC Value', cc_value);
 
                             custRecord.setCurrentSublistValue({
                                 sublistId: 'creditcards',
@@ -197,7 +196,7 @@ define(['N/email', 'N/error', 'N/file', 'N/https', 'N/record', 'N/runtime', 'N/s
                             });
 
                             if (cc_key != 'ccnumber') {
-                                log.debug('CC Key + Value', [cc_key, context.customer.creditcards[line][cc_key]]);
+                                //log.debug('CC Key + Value', [cc_key, context.customer.creditcards[line][cc_key]]);
                             }
                         }
                         
@@ -224,7 +223,6 @@ define(['N/email', 'N/error', 'N/file', 'N/https', 'N/record', 'N/runtime', 'N/s
 
                 var time = new Date().toTimeString().replace(/.*(\d{2}:\d{2}:\d{2}).*/, "$1");
                 log.debug('Time', time);
-                sendToSlack('POST_SUCCESS', [time, context.type, custId]);
                 return custId;
             }
             catch (e) {

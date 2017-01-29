@@ -396,7 +396,7 @@ define(['N/email', 'N/error', 'N/file', 'N/https', 'N/record', 'N/runtime', 'N/s
 
                     return dup;
                 } else {
-                    var error = {}
+                    var error = {};
                     error.error = e;
                     sendToSlack('POST_FAIL', [time, context.type, context.id, e.name, e.type, e.message], true);
                     return error;
